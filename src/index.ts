@@ -2,6 +2,7 @@ import http from "http";
 import express from "express";
 import cors from "cors";
 import { Server } from "colyseus";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 import { monitor } from "@colyseus/monitor";
 import { CaroRoom } from "./rooms/CaroRoom";
 
@@ -14,7 +15,9 @@ app.use("/colyseus", monitor());
 
 const server = http.createServer(app);
 const gameServer = new Server({
-    server,
+    transport: new WebSocketTransport({
+        server,
+    }),
 });
 
 // Register CaroRoom

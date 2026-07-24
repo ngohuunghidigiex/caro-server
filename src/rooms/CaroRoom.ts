@@ -4,7 +4,8 @@ import { CaroState, UserSchema } from "./schema/CaroState";
 const GRID_SIZE = 15;
 const TURN_TIMEOUT_MS = 30000;
 
-export class CaroRoom extends Room<CaroState> {
+export class CaroRoom extends Room {
+    declare state: CaroState;
     maxClients = 50;
     private timerEvent: any = null;
 
