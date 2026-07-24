@@ -226,6 +226,30 @@ export class CaroRoom extends Room {
             this.updateSpectatorCount();
             this.updateRoomMetadata();
         });
+
+        // Handle Player Switch to Spectator Request
+        this.onMessage("switch_to_spectator", (client) => {
+            if (this.state.status !== "waiting") return;
+            const user = this.state.players.get(client.sessionId);
+            if (!user) return;
+
+            const isPlayerX = client.sessionId === this.state.playerXSessionId;
+            const isPlayerO = client.sessionId === this.state.playerOSessionId;
+
+            if (isPlayerX) {
+                this.state.playerXSessionId = "";
+            }
+            if (isPlayerO) {
+                this.state.playerOSessionId = "";
+            }
+
+            user.role = "spectator";
+            user.symbol = "";
+            user.isReady = false;
+
+            this.updateSpectatorCount();
+            this.updateRoomMetadata();
+        });
     }
 
     onJoin(client: Client, options: any) {
