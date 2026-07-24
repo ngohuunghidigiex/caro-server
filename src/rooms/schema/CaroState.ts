@@ -6,14 +6,16 @@ export class UserSchema extends Schema {
     @type("string") declare avatar: string;
     @type("string") declare role: string;
     @type("string") declare symbol: string;
+    @type("boolean") declare isReady: boolean;
 
-    constructor(id = "", name = "", avatar = "", role = "spectator", symbol = "") {
+    constructor(id = "", name = "", avatar = "", role = "spectator", symbol = "", isReady = false) {
         super();
         this.id = id;
         this.name = name;
         this.avatar = avatar;
         this.role = role;
         this.symbol = symbol;
+        this.isReady = isReady;
     }
 }
 
@@ -30,6 +32,15 @@ export class CaroState extends Schema {
     @type("number") declare lastMoveX: number;
     @type("number") declare lastMoveY: number;
 
+    // Blitz Clocks (5 minutes = 300,000 ms per side)
+    @type("number") declare playerXTimeRemaining: number;
+    @type("number") declare playerOTimeRemaining: number;
+    @type("string") declare roomName: string;
+    @type("string") declare endReason: string; // win, surrender, timeout, draw
+    @type("boolean") declare playerXRematchRequested: boolean;
+    @type("boolean") declare playerORematchRequested: boolean;
+    @type(["number"]) declare winningLine: ArraySchema<number>;
+
     constructor() {
         super();
         this.board = new ArraySchema<string>();
@@ -43,5 +54,13 @@ export class CaroState extends Schema {
         this.spectatorCount = 0;
         this.lastMoveX = -1;
         this.lastMoveY = -1;
+
+        this.playerXTimeRemaining = 300000;
+        this.playerOTimeRemaining = 300000;
+        this.roomName = "Caro Match";
+        this.endReason = "";
+        this.playerXRematchRequested = false;
+        this.playerORematchRequested = false;
+        this.winningLine = new ArraySchema<number>();
     }
 }

@@ -1,21 +1,51 @@
 import { Room, Client } from "colyseus";
 import { CaroState, UserSchema } from "./schema/CaroState";
+import { caroRoomRegistry } from "./CaroRoomRegistry";
 
 const GRID_SIZE = 15;
-const TURN_TIMEOUT_MS = 30000;
+const BLITZ_INITIAL_MS = 300000; // 5 minutes
 
 export class CaroRoom extends Room {
     declare state: CaroState;
     maxClients = 50;
-    private timerEvent: any = null;
+    private clockInterval: any = null;
+    private lastTurnTimestamp: number = 0;
 
     onCreate(options: any) {
         this.setState(new CaroState());
+
+        if (options && options.roomName) {
+            this.state.roomName = options.roomName;
+        }
 
         // Initialize 15x15 = 225 empty cells
         for (let i = 0; i < 225; i++) {
             this.state.board.push("");
         }
+
+        caroRoomRegistry.registerRoom(this.roomId, this.state.roomName, options?.name || "Player");
+        this.updateRoomMetadata();
+
+        // Start 1-second simulation clock loop for Blitz countdown
+        this.clockInterval = this.setSimulationInterval(() => {
+            if (this.state.status !== "playing") return;
+
+            const now = Date.now();
+            const elapsed = now - (this.lastTurnTimestamp || now);
+            this.lastTurnTimestamp = now;
+
+            if (this.state.currentTurn === this.state.playerXSessionId) {
+                this.state.playerXTimeRemaining = Math.max(0, this.state.playerXTimeRemaining - elapsed);
+                if (this.state.playerXTimeRemaining <= 0) {
+                    this.endGame(this.state.playerOSessionId, "O", "timeout");
+                }
+            } else if (this.state.currentTurn === this.state.playerOSessionId) {
+                this.state.playerOTimeRemaining = Math.max(0, this.state.playerOTimeRemaining - elapsed);
+                if (this.state.playerOTimeRemaining <= 0) {
+                    this.endGame(this.state.playerXSessionId, "X", "timeout");
+                }
+            }
+        }, 1000);
 
         // Handle Move Message
         this.onMessage("make_move", (client, data: { x: number; y: number }) => {
@@ -37,14 +67,17 @@ export class CaroRoom extends Room {
             this.state.lastMoveY = y;
 
             // Check Win Condition (5 in a row)
-            if (this.checkWin(x, y, user.symbol)) {
-                this.endGame(client.sessionId, user.symbol);
+            const winLine = this.checkWin(x, y, user.symbol);
+            if (winLine) {
+                this.state.winningLine.clear();
+                winLine.forEach((idx) => this.state.winningLine.push(idx));
+                this.endGame(client.sessionId, user.symbol, "win");
                 return;
             }
 
             // Check Draw (Board full)
             if (this.state.board.every((cell) => cell !== "")) {
-                this.endGame("draw", "");
+                this.endGame("draw", "", "draw");
                 return;
             }
 
@@ -55,7 +88,7 @@ export class CaroRoom extends Room {
                     : this.state.playerXSessionId;
 
             this.state.currentTurn = nextTurnSessionId;
-            this.resetTurnTimer();
+            this.lastTurnTimestamp = Date.now();
         });
 
         // Handle Surrender Message
@@ -73,7 +106,125 @@ export class CaroRoom extends Room {
                     : this.state.playerXSessionId;
 
             const winnerUser = this.state.players.get(winnerSessionId);
-            this.endGame(winnerSessionId, winnerUser?.symbol || "");
+            this.endGame(winnerSessionId, winnerUser?.symbol || "", "surrender");
+        });
+
+        // Handle Rematch Request
+        this.onMessage("request_rematch", (client) => {
+            if (this.state.status !== "ended") return;
+
+            if (client.sessionId === this.state.playerXSessionId) {
+                this.state.playerXRematchRequested = true;
+            } else if (client.sessionId === this.state.playerOSessionId) {
+                this.state.playerORematchRequested = true;
+            }
+
+            // If both players requested rematch, start new match & swap sides!
+            if (this.state.playerXRematchRequested && this.state.playerORematchRequested) {
+                this.restartMatchWithSwappedSides();
+            }
+        });
+
+        // Handle Quick Emoji Broadcast
+        this.onMessage("send_reaction", (client, data: { emoji: string }) => {
+            const user = this.state.players.get(client.sessionId);
+            this.broadcast("reaction_received", {
+                sessionId: client.sessionId,
+                userName: user?.name || "Player",
+                emoji: data.emoji,
+            });
+        });
+
+        // Handle Swap Side Request (Host can swap starting symbol between X and O in waiting room)
+        this.onMessage("swap_side", (client) => {
+            if (this.state.status !== "waiting") return;
+            if (
+                client.sessionId !== this.state.playerXSessionId &&
+                client.sessionId !== this.state.playerOSessionId
+            )
+                return;
+
+            const oldX = this.state.playerXSessionId;
+            const oldO = this.state.playerOSessionId;
+
+            this.state.playerXSessionId = oldO;
+            this.state.playerOSessionId = oldX;
+
+            const userOldX = this.state.players.get(oldX);
+            const userOldO = this.state.players.get(oldO);
+
+            if (userOldX) {
+                userOldX.symbol = oldX === this.state.playerXSessionId ? "X" : "O";
+                userOldX.isReady = false;
+            }
+            if (userOldO) {
+                userOldO.symbol = oldO === this.state.playerOSessionId ? "O" : "X";
+                userOldO.isReady = false;
+            }
+
+            this.updateRoomMetadata();
+        });
+
+        // Handle Toggle Ready Request
+        this.onMessage("toggle_ready", (client) => {
+            const user = this.state.players.get(client.sessionId);
+            if (!user) return;
+
+            const isPlayerX = client.sessionId === this.state.playerXSessionId;
+            const isPlayerO = client.sessionId === this.state.playerOSessionId;
+
+            if (isPlayerX || isPlayerO || user.role === "player") {
+                user.role = "player";
+                user.isReady = !user.isReady;
+
+                const playerXUser = this.state.playerXSessionId ? this.state.players.get(this.state.playerXSessionId) : null;
+                const playerOUser = this.state.playerOSessionId ? this.state.players.get(this.state.playerOSessionId) : null;
+
+                // Start match ONLY when both Player X & Player O have clicked Ready!
+                if (
+                    playerXUser &&
+                    playerOUser &&
+                    playerXUser.isReady &&
+                    playerOUser.isReady &&
+                    (this.state.status === "waiting" || this.state.status === "ended")
+                ) {
+                    this.startMatch();
+                }
+            }
+        });
+
+        // Handle Spectator Join as Player Request
+        this.onMessage("join_as_player", (client, data?: { preferredSymbol?: "X" | "O" }) => {
+            if (this.state.status !== "waiting") return;
+            const user = this.state.players.get(client.sessionId);
+            if (!user || user.role === "player") return;
+
+            const preferredSymbol = data?.preferredSymbol || "X";
+
+            if (preferredSymbol === "X" && !this.state.playerXSessionId) {
+                this.state.playerXSessionId = client.sessionId;
+                user.role = "player";
+                user.symbol = "X";
+                user.isReady = false;
+            } else if (preferredSymbol === "O" && !this.state.playerOSessionId) {
+                this.state.playerOSessionId = client.sessionId;
+                user.role = "player";
+                user.symbol = "O";
+                user.isReady = false;
+            } else if (!this.state.playerXSessionId) {
+                this.state.playerXSessionId = client.sessionId;
+                user.role = "player";
+                user.symbol = "X";
+                user.isReady = false;
+            } else if (!this.state.playerOSessionId) {
+                this.state.playerOSessionId = client.sessionId;
+                user.role = "player";
+                user.symbol = "O";
+                user.isReady = false;
+            }
+
+            this.updateSpectatorCount();
+            this.updateRoomMetadata();
         });
     }
 
@@ -82,9 +233,47 @@ export class CaroRoom extends Room {
         user.id = options.userId || client.sessionId;
         user.name = options.name || "Player";
         user.avatar = options.avatar || "";
+        user.isReady = false;
+
+        const requestedRole = options.role || "auto";
+        const preferredSymbol = options.preferredSymbol || "X";
+
+        // Check if an existing player slot belongs to the same userId (reconnect / page refresh)
+        let reconnectedSlot: "X" | "O" | null = null;
+        if (options.userId && options.userId !== "guest") {
+            if (this.state.playerXSessionId) {
+                const playerXUser = this.state.players.get(this.state.playerXSessionId);
+                if (playerXUser && playerXUser.id === options.userId) {
+                    reconnectedSlot = "X";
+                    this.state.players.delete(this.state.playerXSessionId);
+                }
+            }
+            if (!reconnectedSlot && this.state.playerOSessionId) {
+                const playerOUser = this.state.players.get(this.state.playerOSessionId);
+                if (playerOUser && playerOUser.id === options.userId) {
+                    reconnectedSlot = "O";
+                    this.state.players.delete(this.state.playerOSessionId);
+                }
+            }
+        }
 
         // Assign Roles
-        if (!this.state.playerXSessionId) {
+        if (reconnectedSlot === "X") {
+            this.state.playerXSessionId = client.sessionId;
+            user.role = "player";
+            user.symbol = "X";
+        } else if (reconnectedSlot === "O") {
+            this.state.playerOSessionId = client.sessionId;
+            user.role = "player";
+            user.symbol = "O";
+        } else if (requestedRole === "spectator") {
+            user.role = "spectator";
+            user.symbol = "";
+        } else if (preferredSymbol === "O" && !this.state.playerOSessionId) {
+            this.state.playerOSessionId = client.sessionId;
+            user.role = "player";
+            user.symbol = "O";
+        } else if (!this.state.playerXSessionId) {
             this.state.playerXSessionId = client.sessionId;
             user.role = "player";
             user.symbol = "X";
@@ -99,80 +288,143 @@ export class CaroRoom extends Room {
 
         this.state.players.set(client.sessionId, user);
         this.updateSpectatorCount();
-
-        // Start match when 2 players are present
-        if (
-            this.state.playerXSessionId &&
-            this.state.playerOSessionId &&
-            this.state.status === "waiting"
-        ) {
-            this.state.status = "playing";
-            this.state.currentTurn = this.state.playerXSessionId;
-            this.resetTurnTimer();
-        }
+        this.updateRoomMetadata();
     }
 
     onLeave(client: Client) {
         const user = this.state.players.get(client.sessionId);
-        const wasPlayer = user?.role === "player";
+        const leavingSessionId = client.sessionId;
+
+        const isPlayerXLeaving = leavingSessionId === this.state.playerXSessionId;
+        const isPlayerOLeaving = leavingSessionId === this.state.playerOSessionId;
+        const wasPlayer = user?.role === "player" || isPlayerXLeaving || isPlayerOLeaving;
+
+        // Clear player slot
+        if (isPlayerXLeaving) {
+            this.state.playerXSessionId = "";
+        }
+        if (isPlayerOLeaving) {
+            this.state.playerOSessionId = "";
+        }
 
         this.state.players.delete(client.sessionId);
-        this.updateSpectatorCount();
 
-        if (wasPlayer && this.state.status === "playing") {
-            const remainingWinnerId =
-                client.sessionId === this.state.playerXSessionId
-                    ? this.state.playerOSessionId
-                    : this.state.playerXSessionId;
+        // When a player leaves at any time, return remaining player and spectators back to waiting room!
+        if (wasPlayer) {
+            this.state.status = "waiting";
+            this.state.winner = "";
+            this.state.endReason = "";
+            this.state.currentTurn = "";
+            this.state.playerXRematchRequested = false;
+            this.state.playerORematchRequested = false;
 
-            const winnerUser = this.state.players.get(remainingWinnerId);
-            this.endGame(remainingWinnerId, winnerUser?.symbol || "");
+            // Reset ready status for any remaining player
+            this.state.players.forEach((p) => {
+                p.isReady = false;
+            });
+
+            // Clear board
+            for (let i = 0; i < 225; i++) {
+                this.state.board[i] = "";
+            }
         }
+
+        this.updateSpectatorCount();
+        this.updateRoomMetadata();
+    }
+
+    onDispose() {
+        caroRoomRegistry.unregisterRoom(this.roomId);
+    }
+
+    private startMatch(): void {
+        this.state.status = "playing";
+        this.state.currentTurn = this.state.playerXSessionId;
+        this.state.playerXTimeRemaining = BLITZ_INITIAL_MS;
+        this.state.playerOTimeRemaining = BLITZ_INITIAL_MS;
+        this.state.lastMoveX = -1;
+        this.state.lastMoveY = -1;
+        this.state.winner = "";
+        this.state.endReason = "";
+        this.state.playerXRematchRequested = false;
+        this.state.playerORematchRequested = false;
+        this.state.winningLine.clear();
+        this.lastTurnTimestamp = Date.now();
+
+        // Reset ready status
+        this.state.players.forEach((p) => {
+            p.isReady = false;
+        });
+
+        // Clear board
+        for (let i = 0; i < 225; i++) {
+            this.state.board[i] = "";
+        }
+
+        this.updateRoomMetadata();
+    }
+
+    private restartMatchWithSwappedSides(): void {
+        // Swap Player X & Player O session IDs
+        const oldX = this.state.playerXSessionId;
+        const oldO = this.state.playerOSessionId;
+
+        this.state.playerXSessionId = oldO;
+        this.state.playerOSessionId = oldX;
+
+        // Update player schema symbols
+        const userOldX = this.state.players.get(oldX);
+        const userOldO = this.state.players.get(oldO);
+
+        if (userOldX) userOldX.symbol = "O";
+        if (userOldO) userOldO.symbol = "X";
+
+        this.startMatch();
+    }
+
+    private endGame(winnerSessionId: string, winnerSymbol: string, reason: string): void {
+        this.state.status = "ended";
+        this.state.winner = winnerSessionId;
+        this.state.endReason = reason;
+        this.state.currentTurn = "";
+
+        this.updateRoomMetadata();
     }
 
     private updateSpectatorCount(): void {
         let count = 0;
-        this.state.players.forEach((p) => {
-            if (p.role === "spectator") count++;
+        this.state.players.forEach((p, sessionId) => {
+            if (sessionId !== this.state.playerXSessionId && sessionId !== this.state.playerOSessionId) {
+                count++;
+            }
         });
         this.state.spectatorCount = count;
     }
 
-    private resetTurnTimer(): void {
-        if (this.timerEvent) {
-            this.timerEvent.clear();
-        }
+    private updateRoomMetadata(): void {
+        const hostUser = this.state.playerXSessionId
+            ? this.state.players.get(this.state.playerXSessionId)
+            : this.state.playerOSessionId
+            ? this.state.players.get(this.state.playerOSessionId)
+            : null;
 
-        this.state.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+        let playerCount = 0;
+        if (this.state.playerXSessionId) playerCount++;
+        if (this.state.playerOSessionId) playerCount++;
 
-        this.timerEvent = this.clock.setTimeout(() => {
-            if (this.state.status !== "playing") return;
+        const metadata = {
+            roomName: this.state.roomName,
+            hostName: hostUser?.name || "Player",
+            playerCount,
+            spectatorCount: this.state.spectatorCount,
+            status: this.state.status,
+        };
 
-            // Timeout forfeit -> Opposite player wins
-            const loserId = this.state.currentTurn;
-            const winnerId =
-                loserId === this.state.playerXSessionId
-                    ? this.state.playerOSessionId
-                    : this.state.playerXSessionId;
-
-            const winnerUser = this.state.players.get(winnerId);
-            this.endGame(winnerId, winnerUser?.symbol || "");
-        }, TURN_TIMEOUT_MS);
+        this.setMetadata(metadata);
+        caroRoomRegistry.updateRoom(this.roomId, metadata);
     }
 
-    private endGame(winnerSessionId: string, winnerSymbol: string): void {
-        if (this.timerEvent) {
-            this.timerEvent.clear();
-            this.timerEvent = null;
-        }
-
-        this.state.status = "ended";
-        this.state.winner = winnerSessionId;
-        this.state.currentTurn = "";
-        this.state.turnDeadline = 0;
-    }
-
-    private checkWin(startX: number, startY: number, symbol: string): boolean {
+    private checkWin(startX: number, startY: number, symbol: string): number[] | null {
         const board = this.state.board;
         const directions = [
             [1, 0],  // Horizontal
@@ -182,14 +434,15 @@ export class CaroRoom extends Room {
         ];
 
         for (const [dx, dy] of directions) {
-            let count = 1;
+            const line: number[] = [startY * GRID_SIZE + startX];
 
             // Positive direction
             for (let step = 1; step < 5; step++) {
                 const nx = startX + dx * step;
                 const ny = startY + dy * step;
                 if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) break;
-                if (board[ny * GRID_SIZE + nx] === symbol) count++;
+                const idx = ny * GRID_SIZE + nx;
+                if (board[idx] === symbol) line.push(idx);
                 else break;
             }
 
@@ -198,13 +451,14 @@ export class CaroRoom extends Room {
                 const nx = startX - dx * step;
                 const ny = startY - dy * step;
                 if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) break;
-                if (board[ny * GRID_SIZE + nx] === symbol) count++;
+                const idx = ny * GRID_SIZE + nx;
+                if (board[idx] === symbol) line.push(idx);
                 else break;
             }
 
-            if (count >= 5) return true;
+            if (line.length >= 5) return line;
         }
 
-        return false;
+        return null;
     }
 }
