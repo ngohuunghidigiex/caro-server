@@ -9,9 +9,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@colyseus/monitor": "^0.17.4",
-    "@colyseus/schema": "^3.0.76",
-    "colyseus": "^0.17.44",
+    "@colyseus/monitor": "^0.17.8",
+    "@colyseus/schema": "^4.0.28",
+    "@colyseus/ws-transport": "^0.17.8",
+    "colyseus": "^0.17.10",
     "cors": "^2.8.5",
     "express": "^4.21.2"
   },
