@@ -75,7 +75,13 @@ export class CaroRoom extends Room {
         // Handle Move Message
         this.onMessage("make_move", (client, data: { x: number; y: number }) => {
             if (this.state.status !== "playing") return;
-            if (this.state.currentTurn !== client.sessionId) return;
+
+            const isCurrentTurn =
+                this.state.currentTurn === client.sessionId ||
+                (this.state.currentTurn === this.state.playerXSessionId && client.sessionId === this.state.playerXSessionId) ||
+                (this.state.currentTurn === this.state.playerOSessionId && client.sessionId === this.state.playerOSessionId);
+
+            if (!isCurrentTurn) return;
 
             const { x, y } = data;
             if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return;
@@ -309,13 +315,21 @@ export class CaroRoom extends Room {
 
         // Assign Roles
         if (reconnectedSlot === "X") {
+            const oldXSessionId = this.state.playerXSessionId;
             this.state.playerXSessionId = client.sessionId;
             user.role = "player";
             user.symbol = "X";
+            if (this.state.currentTurn === oldXSessionId || !this.state.currentTurn) {
+                this.state.currentTurn = client.sessionId;
+            }
         } else if (reconnectedSlot === "O") {
+            const oldOSessionId = this.state.playerOSessionId;
             this.state.playerOSessionId = client.sessionId;
             user.role = "player";
             user.symbol = "O";
+            if (this.state.currentTurn === oldOSessionId || !this.state.currentTurn) {
+                this.state.currentTurn = client.sessionId;
+            }
         } else if (requestedRole === "spectator") {
             user.role = "spectator";
             user.symbol = "";
