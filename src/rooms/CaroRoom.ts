@@ -324,6 +324,9 @@ export class CaroRoom extends Room {
             if (this.state.currentTurn === oldXSessionId || !this.state.currentTurn) {
                 this.state.currentTurn = client.sessionId;
             }
+            // Clear away status since player reconnected!
+            this.state.disconnectedPlayerSessionId = "";
+            this.state.reconnectDeadlineTimestamp = 0;
         } else if (reconnectedSlot === "O") {
             const oldOSessionId = this.state.playerOSessionId;
             this.state.playerOSessionId = client.sessionId;
@@ -332,6 +335,9 @@ export class CaroRoom extends Room {
             if (this.state.currentTurn === oldOSessionId || !this.state.currentTurn) {
                 this.state.currentTurn = client.sessionId;
             }
+            // Clear away status since player reconnected!
+            this.state.disconnectedPlayerSessionId = "";
+            this.state.reconnectDeadlineTimestamp = 0;
         } else if (requestedRole === "spectator") {
             user.role = "spectator";
             user.symbol = "";
@@ -352,7 +358,7 @@ export class CaroRoom extends Room {
             user.symbol = "";
         }
 
-                this.state.players.set(client.sessionId, user);
+        this.state.players.set(client.sessionId, user);
         this.updateSpectatorCount();
         this.updateRoomMetadata();
     }
@@ -381,13 +387,27 @@ export class CaroRoom extends Room {
                 this.updateRoomMetadata();
                 return;
             } catch (e) {
-                // Disconnection 20s grace window expired: forfeit game to the other player!
-                this.state.disconnectedPlayerSessionId = "";
-                this.state.reconnectDeadlineTimestamp = 0;
-                const winnerSessionId = isPlayerXLeaving ? this.state.playerOSessionId : this.state.playerXSessionId;
-                const winnerSymbol = isPlayerXLeaving ? "O" : "X";
-                if (winnerSessionId) {
-                    this.endGame(winnerSessionId, winnerSymbol, "surrender");
+                // Check if player has ALREADY reconnected under a new sessionId or if slot is still disconnected!
+                const currentSlotSessionId = isPlayerXLeaving ? this.state.playerXSessionId : this.state.playerOSessionId;
+                const isPlayerStillDisconnected =
+                    !currentSlotSessionId ||
+                    currentSlotSessionId === leavingSessionId ||
+                    this.state.disconnectedPlayerSessionId === leavingSessionId;
+
+                if (isPlayerStillDisconnected) {
+                    // Disconnection 20s grace window expired and player NEVER reconnected: forfeit game!
+                    this.state.disconnectedPlayerSessionId = "";
+                    this.state.reconnectDeadlineTimestamp = 0;
+                    const winnerSessionId = isPlayerXLeaving ? this.state.playerOSessionId : this.state.playerXSessionId;
+                    const winnerSymbol = isPlayerXLeaving ? "O" : "X";
+                    if (winnerSessionId) {
+                        this.endGame(winnerSessionId, winnerSymbol, "surrender");
+                    }
+                } else {
+                    // Player ALREADY reconnected under new sessionId! Do NOT forfeit!
+                    this.state.disconnectedPlayerSessionId = "";
+                    this.state.reconnectDeadlineTimestamp = 0;
+                    this.updateRoomMetadata();
                 }
             }
         }
