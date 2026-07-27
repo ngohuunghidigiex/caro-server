@@ -19,6 +19,9 @@ export class CaroRoom extends Room {
         }
         if (options && typeof options.timeLimit === "number") {
             this.state.timeLimit = options.timeLimit;
+            const perPlayerMs = options.timeLimit > 0 ? (options.timeLimit / 2) * 60 * 1000 : 0;
+            this.state.playerXTimeRemaining = perPlayerMs;
+            this.state.playerOTimeRemaining = perPlayerMs;
         }
 
         // Initialize 15x15 = 225 empty cells
@@ -53,21 +56,20 @@ export class CaroRoom extends Room {
 
         // Handle Set Time Limit Request
         this.onMessage("set_time_limit", (client, data: any) => {
-            console.log(`[CaroRoom Server] ⏱️ set_time_limit received from ${client.sessionId}:`, data);
             if (this.state.status !== "waiting") {
-                console.warn(`[CaroRoom Server] ⚠️ Rejected set_time_limit: status is '${this.state.status}' (expected 'waiting')`);
                 return;
             }
             const user = this.state.players.get(client.sessionId);
             const isHost = client.sessionId === this.state.playerXSessionId || (user && user.symbol === "X");
             if (!isHost) {
-                console.warn(`[CaroRoom Server] ⚠️ Rejected set_time_limit: client ${client.sessionId} is not host!`);
                 return;
             }
 
             const timeLimit = typeof data === "number" ? data : typeof data?.timeLimit === "number" ? data.timeLimit : 5;
-            console.log(`[CaroRoom Server] ✅ Updated room timeLimit to: ${timeLimit}m`);
             this.state.timeLimit = timeLimit;
+            const perPlayerMs = timeLimit > 0 ? (timeLimit / 2) * 60 * 1000 : 0;
+            this.state.playerXTimeRemaining = perPlayerMs;
+            this.state.playerOTimeRemaining = perPlayerMs;
             this.updateRoomMetadata();
             this.broadcast("time_limit_changed", { timeLimit });
         });
@@ -363,15 +365,25 @@ export class CaroRoom extends Room {
         const isPlayerOLeaving = leavingSessionId === this.state.playerOSessionId;
         const wasPlayer = user?.role === "player" || isPlayerXLeaving || isPlayerOLeaving;
 
-        const isAbnormalLeave = code !== 1000;
-        if (wasPlayer && this.state.status === "playing" && isAbnormalLeave) {
+        if (wasPlayer && this.state.status === "playing") {
+            // Set away status and 20s countdown for remaining player UI
+            this.state.disconnectedPlayerSessionId = leavingSessionId;
+            this.state.reconnectDeadlineTimestamp = Date.now() + 20000;
+            this.updateRoomMetadata();
+
             try {
-                // Allow 20s reconnection grace window for accidental refresh/drops
+                // Allow 20s reconnection grace window for ANY disconnect/reload/leave during match
                 await this.allowReconnection(client, 20);
+                // Player reconnected successfully within 20s!
+                this.state.disconnectedPlayerSessionId = "";
+                this.state.reconnectDeadlineTimestamp = 0;
                 this.lastTurnTimestamp = Date.now();
+                this.updateRoomMetadata();
                 return;
             } catch (e) {
-                // Disconnection grace window expired: forfeit game to the other player
+                // Disconnection 20s grace window expired: forfeit game to the other player!
+                this.state.disconnectedPlayerSessionId = "";
+                this.state.reconnectDeadlineTimestamp = 0;
                 const winnerSessionId = isPlayerXLeaving ? this.state.playerOSessionId : this.state.playerXSessionId;
                 const winnerSymbol = isPlayerXLeaving ? "O" : "X";
                 if (winnerSessionId) {
@@ -390,8 +402,8 @@ export class CaroRoom extends Room {
 
         this.state.players.delete(client.sessionId);
 
-        // When a player leaves at any time, return remaining player and spectators back to waiting room!
-        if (wasPlayer) {
+        // When a player leaves when match is NOT playing (or after game has ended), return remaining player to waiting room
+        if (wasPlayer && this.state.status !== "ended") {
             this.state.status = "waiting";
             this.state.winner = "";
             this.state.endReason = "";
@@ -421,15 +433,17 @@ export class CaroRoom extends Room {
     private startMatch(): void {
         this.state.status = "playing";
         this.state.currentTurn = this.state.playerXSessionId;
-        const initialMs = this.state.timeLimit > 0 ? this.state.timeLimit * 60 * 1000 : 0;
-        this.state.playerXTimeRemaining = initialMs;
-        this.state.playerOTimeRemaining = initialMs;
+        const perPlayerMs = this.state.timeLimit > 0 ? (this.state.timeLimit / 2) * 60 * 1000 : 0;
+        this.state.playerXTimeRemaining = perPlayerMs;
+        this.state.playerOTimeRemaining = perPlayerMs;
         this.state.lastMoveX = -1;
         this.state.lastMoveY = -1;
         this.state.winner = "";
         this.state.endReason = "";
         this.state.playerXRematchRequested = false;
         this.state.playerORematchRequested = false;
+        this.state.disconnectedPlayerSessionId = "";
+        this.state.reconnectDeadlineTimestamp = 0;
         this.state.winningLine.clear();
         this.lastTurnTimestamp = Date.now();
 

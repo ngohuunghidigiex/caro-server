@@ -41,6 +41,8 @@ export class CaroState extends Schema {
     @type("boolean") declare playerORematchRequested: boolean;
     @type("number") declare timeLimit: number;
     @type(["number"]) declare winningLine: ArraySchema<number>;
+    @type("string") declare disconnectedPlayerSessionId: string;
+    @type("number") declare reconnectDeadlineTimestamp: number;
 
     constructor() {
         super();
@@ -64,5 +66,7 @@ export class CaroState extends Schema {
         this.playerORematchRequested = false;
         this.timeLimit = 5;
         this.winningLine = new ArraySchema<number>();
+        this.disconnectedPlayerSessionId = "";
+        this.reconnectDeadlineTimestamp = 0;
     }
 }
