@@ -52,14 +52,24 @@ export class CaroRoom extends Room {
         }, 1000);
 
         // Handle Set Time Limit Request
-        this.onMessage("set_time_limit", (client, data: { timeLimit: number }) => {
-            if (this.state.status !== "waiting") return;
-            const isHost = client.sessionId === this.state.playerXSessionId;
-            if (!isHost) return;
+        this.onMessage("set_time_limit", (client, data: any) => {
+            console.log(`[CaroRoom Server] ⏱️ set_time_limit received from ${client.sessionId}:`, data);
+            if (this.state.status !== "waiting") {
+                console.warn(`[CaroRoom Server] ⚠️ Rejected set_time_limit: status is '${this.state.status}' (expected 'waiting')`);
+                return;
+            }
+            const user = this.state.players.get(client.sessionId);
+            const isHost = client.sessionId === this.state.playerXSessionId || (user && user.symbol === "X");
+            if (!isHost) {
+                console.warn(`[CaroRoom Server] ⚠️ Rejected set_time_limit: client ${client.sessionId} is not host!`);
+                return;
+            }
 
-            const timeLimit = typeof data?.timeLimit === "number" ? data.timeLimit : 5;
+            const timeLimit = typeof data === "number" ? data : typeof data?.timeLimit === "number" ? data.timeLimit : 5;
+            console.log(`[CaroRoom Server] ✅ Updated room timeLimit to: ${timeLimit}m`);
             this.state.timeLimit = timeLimit;
             this.updateRoomMetadata();
+            this.broadcast("time_limit_changed", { timeLimit });
         });
 
         // Handle Move Message
