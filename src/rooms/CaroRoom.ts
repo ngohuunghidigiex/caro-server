@@ -17,6 +17,9 @@ export class CaroRoom extends Room {
         if (options && options.roomName) {
             this.state.roomName = options.roomName;
         }
+        if (options && typeof options.timeLimit === "number") {
+            this.state.timeLimit = options.timeLimit;
+        }
 
         // Initialize 15x15 = 225 empty cells
         for (let i = 0; i < 225; i++) {
@@ -29,6 +32,7 @@ export class CaroRoom extends Room {
         // Start 1-second simulation clock loop for Blitz countdown
         this.clockInterval = this.setSimulationInterval(() => {
             if (this.state.status !== "playing") return;
+            if (this.state.timeLimit === 0) return;
 
             const now = Date.now();
             const elapsed = now - (this.lastTurnTimestamp || now);
@@ -46,6 +50,17 @@ export class CaroRoom extends Room {
                 }
             }
         }, 1000);
+
+        // Handle Set Time Limit Request
+        this.onMessage("set_time_limit", (client, data: { timeLimit: number }) => {
+            if (this.state.status !== "waiting") return;
+            const isHost = client.sessionId === this.state.playerXSessionId;
+            if (!isHost) return;
+
+            const timeLimit = typeof data?.timeLimit === "number" ? data.timeLimit : 5;
+            this.state.timeLimit = timeLimit;
+            this.updateRoomMetadata();
+        });
 
         // Handle Move Message
         this.onMessage("make_move", (client, data: { x: number; y: number }) => {
@@ -167,6 +182,7 @@ export class CaroRoom extends Room {
 
         // Handle Toggle Ready Request
         this.onMessage("toggle_ready", (client) => {
+            if (this.state.status !== "waiting") return;
             const user = this.state.players.get(client.sessionId);
             if (!user) return;
 
@@ -310,18 +326,35 @@ export class CaroRoom extends Room {
             user.symbol = "";
         }
 
-        this.state.players.set(client.sessionId, user);
+                this.state.players.set(client.sessionId, user);
         this.updateSpectatorCount();
         this.updateRoomMetadata();
     }
 
-    onLeave(client: Client) {
+    async onLeave(client: Client, code?: number) {
         const user = this.state.players.get(client.sessionId);
         const leavingSessionId = client.sessionId;
 
         const isPlayerXLeaving = leavingSessionId === this.state.playerXSessionId;
         const isPlayerOLeaving = leavingSessionId === this.state.playerOSessionId;
         const wasPlayer = user?.role === "player" || isPlayerXLeaving || isPlayerOLeaving;
+
+        const isAbnormalLeave = code !== 1000;
+        if (wasPlayer && this.state.status === "playing" && isAbnormalLeave) {
+            try {
+                // Allow 20s reconnection grace window for accidental refresh/drops
+                await this.allowReconnection(client, 20);
+                this.lastTurnTimestamp = Date.now();
+                return;
+            } catch (e) {
+                // Disconnection grace window expired: forfeit game to the other player
+                const winnerSessionId = isPlayerXLeaving ? this.state.playerOSessionId : this.state.playerXSessionId;
+                const winnerSymbol = isPlayerXLeaving ? "O" : "X";
+                if (winnerSessionId) {
+                    this.endGame(winnerSessionId, winnerSymbol, "surrender");
+                }
+            }
+        }
 
         // Clear player slot
         if (isPlayerXLeaving) {
@@ -364,8 +397,9 @@ export class CaroRoom extends Room {
     private startMatch(): void {
         this.state.status = "playing";
         this.state.currentTurn = this.state.playerXSessionId;
-        this.state.playerXTimeRemaining = BLITZ_INITIAL_MS;
-        this.state.playerOTimeRemaining = BLITZ_INITIAL_MS;
+        const initialMs = this.state.timeLimit > 0 ? this.state.timeLimit * 60 * 1000 : 0;
+        this.state.playerXTimeRemaining = initialMs;
+        this.state.playerOTimeRemaining = initialMs;
         this.state.lastMoveX = -1;
         this.state.lastMoveY = -1;
         this.state.winner = "";
@@ -442,8 +476,8 @@ export class CaroRoom extends Room {
             playerCount,
             spectatorCount: this.state.spectatorCount,
             status: this.state.status,
+            timeLimit: this.state.timeLimit,
         };
-
         this.setMetadata(metadata);
         caroRoomRegistry.updateRoom(this.roomId, metadata);
     }

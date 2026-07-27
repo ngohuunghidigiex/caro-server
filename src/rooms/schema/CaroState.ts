@@ -39,6 +39,7 @@ export class CaroState extends Schema {
     @type("string") declare endReason: string; // win, surrender, timeout, draw
     @type("boolean") declare playerXRematchRequested: boolean;
     @type("boolean") declare playerORematchRequested: boolean;
+    @type("number") declare timeLimit: number;
     @type(["number"]) declare winningLine: ArraySchema<number>;
 
     constructor() {
@@ -61,6 +62,7 @@ export class CaroState extends Schema {
         this.endReason = "";
         this.playerXRematchRequested = false;
         this.playerORematchRequested = false;
+        this.timeLimit = 5;
         this.winningLine = new ArraySchema<number>();
     }
 }

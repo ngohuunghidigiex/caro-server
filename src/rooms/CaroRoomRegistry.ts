@@ -5,11 +5,23 @@ export interface CaroRoomListing {
     playerCount: number;
     spectatorCount: number;
     status: string;
+    timeLimit?: number;
     createdAt: number;
 }
 
 class RoomRegistryManager {
     private rooms = new Map<string, CaroRoomListing>();
+
+    constructor() {
+        setInterval(() => {
+            const now = Date.now();
+            for (const [id, room] of this.rooms.entries()) {
+                if (now - (room.createdAt || 0) > 10 * 60 * 1000 && room.playerCount <= 0) {
+                    this.rooms.delete(id);
+                }
+            }
+        }, 60000);
+    }
 
     registerRoom(roomId: string, name: string, hostName: string): void {
         this.rooms.set(roomId, {
