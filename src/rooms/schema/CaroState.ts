@@ -1,72 +1,81 @@
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 
 export class UserSchema extends Schema {
-    @type("string") declare id: string;
-    @type("string") declare name: string;
-    @type("string") declare avatar: string;
-    @type("string") declare role: string;
-    @type("string") declare symbol: string;
-    @type("boolean") declare isReady: boolean;
+  @type("string") declare id: string;
+  @type("string") declare name: string;
+  @type("string") declare avatar: string;
+  @type("string") declare role: string;
+  @type("string") declare symbol: string;
+  @type("boolean") declare isReady: boolean;
 
-    constructor(id = "", name = "", avatar = "", role = "spectator", symbol = "", isReady = false) {
-        super();
-        this.id = id;
-        this.name = name;
-        this.avatar = avatar;
-        this.role = role;
-        this.symbol = symbol;
-        this.isReady = isReady;
-    }
+  constructor(
+    id = "",
+    name = "",
+    avatar = "",
+    role = "spectator",
+    symbol = "",
+    isReady = false,
+  ) {
+    super();
+    this.id = id;
+    this.name = name;
+    this.avatar = avatar;
+    this.role = role;
+    this.symbol = symbol;
+    this.isReady = isReady;
+  }
 }
 
 export class CaroState extends Schema {
-    @type(["string"]) declare board: ArraySchema<string>;
-    @type({ map: UserSchema }) declare players: MapSchema<UserSchema>;
-    @type("string") declare playerXSessionId: string;
-    @type("string") declare playerOSessionId: string;
-    @type("string") declare currentTurn: string;
-    @type("string") declare winner: string;
-    @type("string") declare status: string;
-    @type("number") declare turnDeadline: number;
-    @type("number") declare spectatorCount: number;
-    @type("number") declare lastMoveX: number;
-    @type("number") declare lastMoveY: number;
+  @type(["string"]) declare board: ArraySchema<string>;
+  @type({ map: UserSchema }) declare players: MapSchema<UserSchema>;
+  @type("string") declare playerXSessionId: string;
+  @type("string") declare playerOSessionId: string;
+  @type("string") declare currentTurn: string;
+  @type("string") declare winner: string;
+  @type("string") declare status: string;
+  @type("number") declare turnDeadline: number;
+  @type("number") declare spectatorCount: number;
+  @type("number") declare lastMoveX: number;
+  @type("number") declare lastMoveY: number;
 
-    // Blitz Clocks (5 minutes = 300,000 ms per side)
-    @type("number") declare playerXTimeRemaining: number;
-    @type("number") declare playerOTimeRemaining: number;
-    @type("string") declare roomName: string;
-    @type("string") declare endReason: string; // win, surrender, timeout, draw
-    @type("boolean") declare playerXRematchRequested: boolean;
-    @type("boolean") declare playerORematchRequested: boolean;
-    @type("number") declare timeLimit: number;
-    @type(["number"]) declare winningLine: ArraySchema<number>;
-    @type("string") declare disconnectedPlayerSessionId: string;
-    @type("number") declare reconnectDeadlineTimestamp: number;
+  // Blitz Clocks (5 minutes = 300,000 ms per side)
+  @type("number") declare playerXTimeRemaining: number;
+  @type("number") declare playerOTimeRemaining: number;
+  @type("string") declare roomName: string;
+  @type("string") declare workspaceId: string;
+  @type("string") declare endReason: string; // win, surrender, timeout, draw
+  @type("boolean") declare playerXRematchRequested: boolean;
+  @type("boolean") declare playerORematchRequested: boolean;
+  @type("number") declare timeLimit: number;
+  @type(["number"]) declare winningLine: ArraySchema<number>;
+  @type("string") declare disconnectedPlayerSessionId: string;
+  @type("number") declare reconnectDeadlineTimestamp: number;
 
-    constructor() {
-        super();
-        this.board = new ArraySchema<string>();
-        this.players = new MapSchema<UserSchema>();
-        this.playerXSessionId = "";
-        this.playerOSessionId = "";
-        this.currentTurn = "";
-        this.winner = "";
-        this.status = "waiting";
-        this.turnDeadline = 0;
-        this.spectatorCount = 0;
-        this.lastMoveX = -1;
-        this.lastMoveY = -1;
+  constructor() {
+    super();
+    this.board = new ArraySchema<string>();
+    this.players = new MapSchema<UserSchema>();
+    this.playerXSessionId = "";
+    this.playerOSessionId = "";
+    this.currentTurn = "";
+    this.winner = "";
+    this.status = "waiting";
+    this.turnDeadline = 0;
+    this.spectatorCount = 0;
+    this.lastMoveX = -1;
+    this.lastMoveY = -1;
 
-        this.playerXTimeRemaining = 300000;
-        this.playerOTimeRemaining = 300000;
-        this.roomName = "Caro Match";
-        this.endReason = "";
-        this.playerXRematchRequested = false;
-        this.playerORematchRequested = false;
-        this.timeLimit = 5;
-        this.winningLine = new ArraySchema<number>();
-        this.disconnectedPlayerSessionId = "";
-        this.reconnectDeadlineTimestamp = 0;
-    }
+    this.playerXTimeRemaining = 300000;
+    this.playerOTimeRemaining = 300000;
+    this.roomName = "Caro Match";
+    this.workspaceId = "";
+    this.endReason = "";
+    this.playerXRematchRequested = false;
+    this.playerORematchRequested = false;
+    this.timeLimit = 5;
+    this.winningLine = new ArraySchema<number>();
+    this.disconnectedPlayerSessionId = "";
+    this.reconnectDeadlineTimestamp = 0;
+  }
 }

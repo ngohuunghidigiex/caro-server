@@ -15,12 +15,13 @@ app.use(express.json());
 app.use("/colyseus", monitor());
 
 // Custom room listing endpoint for instant room discovery
-app.get("/api/caro-rooms", (_req, res) => {
+app.get("/api/caro-rooms", (req, res) => {
     try {
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         res.setHeader("Pragma", "no-cache");
         res.setHeader("Expires", "0");
-        res.json(caroRoomRegistry.getAllRooms());
+        const workspaceId = req.query.workspaceId as string | undefined;
+        res.json(caroRoomRegistry.getAllRooms(workspaceId));
     } catch (err) {
         console.error("[CaroServer] Error querying room listing:", err);
         res.json([]);

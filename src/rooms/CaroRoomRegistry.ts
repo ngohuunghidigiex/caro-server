@@ -1,54 +1,68 @@
 export interface CaroRoomListing {
-    roomId: string;
-    roomName: string;
-    hostName: string;
-    playerCount: number;
-    spectatorCount: number;
-    status: string;
-    timeLimit?: number;
-    createdAt: number;
+  roomId: string;
+  roomName: string;
+  hostName: string;
+  playerCount: number;
+  spectatorCount: number;
+  status: string;
+  timeLimit?: number;
+  createdAt: number;
+  workspaceId?: string;
 }
 
 class RoomRegistryManager {
-    private rooms = new Map<string, CaroRoomListing>();
+  private rooms = new Map<string, CaroRoomListing>();
 
-    constructor() {
-        setInterval(() => {
-            const now = Date.now();
-            for (const [id, room] of this.rooms.entries()) {
-                if (now - (room.createdAt || 0) > 10 * 60 * 1000 && room.playerCount <= 0) {
-                    this.rooms.delete(id);
-                }
-            }
-        }, 60000);
-    }
-
-    registerRoom(roomId: string, name: string, hostName: string): void {
-        this.rooms.set(roomId, {
-            roomId,
-            roomName: name || "Caro 1v1 Room",
-            hostName: hostName || "Player",
-            playerCount: 1,
-            spectatorCount: 0,
-            status: "waiting",
-            createdAt: Date.now(),
-        });
-    }
-
-    updateRoom(roomId: string, updates: Partial<CaroRoomListing>): void {
-        const existing = this.rooms.get(roomId);
-        if (existing) {
-            this.rooms.set(roomId, { ...existing, ...updates });
+  constructor() {
+    setInterval(() => {
+      const now = Date.now();
+      for (const [id, room] of this.rooms.entries()) {
+        if (
+          now - (room.createdAt || 0) > 10 * 60 * 1000 &&
+          room.playerCount <= 0
+        ) {
+          this.rooms.delete(id);
         }
-    }
+      }
+    }, 60000);
+  }
 
-    unregisterRoom(roomId: string): void {
-        this.rooms.delete(roomId);
-    }
+  registerRoom(
+    roomId: string,
+    name: string,
+    hostName: string,
+    workspaceId?: string,
+  ): void {
+    this.rooms.set(roomId, {
+      roomId,
+      roomName: name || "Caro 1v1 Room",
+      hostName: hostName || "Player",
+      playerCount: 1,
+      spectatorCount: 0,
+      status: "waiting",
+      createdAt: Date.now(),
+      workspaceId: workspaceId || "",
+    });
+  }
 
-    getAllRooms(): CaroRoomListing[] {
-        return Array.from(this.rooms.values()).sort((a, b) => b.createdAt - a.createdAt);
+  updateRoom(roomId: string, updates: Partial<CaroRoomListing>): void {
+    const existing = this.rooms.get(roomId);
+    if (existing) {
+      this.rooms.set(roomId, { ...existing, ...updates });
     }
+  }
+
+  unregisterRoom(roomId: string): void {
+    this.rooms.delete(roomId);
+  }
+
+  getAllRooms(workspaceId?: string): CaroRoomListing[] {
+    let list = Array.from(this.rooms.values());
+    if (workspaceId) {
+      list = list.filter((r) => r.workspaceId === workspaceId);
+    }
+    return list.sort((a, b) => b.createdAt - a.createdAt);
+  }
 }
 
 export const caroRoomRegistry = new RoomRegistryManager();

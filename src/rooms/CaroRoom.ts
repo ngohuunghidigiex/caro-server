@@ -17,6 +17,9 @@ export class CaroRoom extends Room {
         if (options && options.roomName) {
             this.state.roomName = options.roomName;
         }
+        if (options && options.workspaceId) {
+            this.state.workspaceId = options.workspaceId;
+        }
         if (options && typeof options.timeLimit === "number") {
             this.state.timeLimit = options.timeLimit;
             const perPlayerMs = options.timeLimit > 0 ? (options.timeLimit / 2) * 60 * 1000 : 0;
@@ -29,7 +32,7 @@ export class CaroRoom extends Room {
             this.state.board.push("");
         }
 
-        caroRoomRegistry.registerRoom(this.roomId, this.state.roomName, options?.name || "Player");
+        caroRoomRegistry.registerRoom(this.roomId, this.state.roomName, options?.name || "Player", options?.workspaceId);
         this.updateRoomMetadata();
 
         // Start 1-second simulation clock loop for Blitz countdown
@@ -287,6 +290,10 @@ export class CaroRoom extends Room {
     }
 
     onJoin(client: Client, options: any) {
+        if (options && options.workspaceId && !this.state.workspaceId) {
+            this.state.workspaceId = options.workspaceId;
+        }
+
         const user = new UserSchema();
         user.id = options.userId || client.sessionId;
         user.name = options.name || "Player";
@@ -537,6 +544,7 @@ export class CaroRoom extends Room {
             spectatorCount: this.state.spectatorCount,
             status: this.state.status,
             timeLimit: this.state.timeLimit,
+            workspaceId: this.state.workspaceId,
         };
         this.setMetadata(metadata);
         caroRoomRegistry.updateRoom(this.roomId, metadata);
