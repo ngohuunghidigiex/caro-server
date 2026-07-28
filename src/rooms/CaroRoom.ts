@@ -298,7 +298,7 @@ export class CaroRoom extends Room {
 
         // Check if an existing player slot belongs to the same userId (reconnect / page refresh)
         let reconnectedSlot: "X" | "O" | null = null;
-        if (options.userId && options.userId !== "guest") {
+        if (options.userId) {
             if (this.state.playerXSessionId) {
                 const playerXUser = this.state.players.get(this.state.playerXSessionId);
                 if (playerXUser && playerXUser.id === options.userId) {
@@ -403,11 +403,13 @@ export class CaroRoom extends Room {
                     if (winnerSessionId) {
                         this.endGame(winnerSessionId, winnerSymbol, "surrender");
                     }
+                    return;
                 } else {
-                    // Player ALREADY reconnected under new sessionId! Do NOT forfeit!
+                    // Player ALREADY reconnected under new sessionId! Do NOT forfeit, do NOT reset room!
                     this.state.disconnectedPlayerSessionId = "";
                     this.state.reconnectDeadlineTimestamp = 0;
                     this.updateRoomMetadata();
+                    return;
                 }
             }
         }
